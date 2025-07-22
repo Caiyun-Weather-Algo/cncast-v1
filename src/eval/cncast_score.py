@@ -6,7 +6,8 @@ import arrow, hydra
 from omegaconf import DictConfig
 
 from evaluation import mid_rmse
-from utils import util
+from src.utils import util
+from src.eval.eval_utils import final_rmse
 
 
 def load_cncast(t):
@@ -35,23 +36,11 @@ def timestamp_to_datetime(ts):
     return datetime.fromtimestamp(ts)
 
 
-def final_rmse(scores, cfg):
-    final_score = {"surf":{}, "high":{}}
-    # cnt = xm.xrt_world_size()
-    for k, v in scores["surf"].items():
-        final_score["surf"][k] = [np.sqrt(v[1]/v[0]/241/281),  # RMSE
-                                  v[2]/np.sqrt(v[3]*v[4])]                        # ACC
-    
-    for k, v in scores["high"].items():
-        final_score["high"][k] = [np.sqrt(v[1]/v[0]/241/281),  # RMSE
-                                  v[2]/np.sqrt(v[3]*v[4])]                        # ACC
-    return final_score
-
 @hydra.main(version_base=None, config_path="./configs", config_name="online.yaml")
 def main(cfg):
     bucket_central1 = cfg.buckets.bucket_base
     lat_weights = util.lat_weight()[None,None,:]
-    variables = util.reset_era5_stat()
+    variables = util.era5_stat()
     era5_levels = variables["levels"]
     levels = [1000, 950, 850, 700, 600, 500,450,400,300,250,200,150,100]
     lev_idxs = [era5_levels.index(lev) for lev in levels]
@@ -92,7 +81,6 @@ def main(cfg):
                 rmse_high = util.RMSE(y_high, cncast_upper, lat_weights) + rmse_high
                 acc_high = util.ACC(y_high, cncast_upper, avgs[1], lat_weights) + acc_high
                 # print(t, rmse_srf, acc_srf, rmse_high, acc_high)
-                # mid_rmse((cncast_surf, cncast_upper), [y_surf, y_high], scores, cfg, lat_weights, avgs)
                 print("one update costs:",t, time.time()-t0)
                 # break
             except:
@@ -113,7 +101,7 @@ def main(cfg):
         for i,var in enumerate(cfg.input.high):
             final_score["high"][var] = [rmse_high[:,i]/(k+1-damaged), acc_high[:,i]/(k+1-damaged)]
         print(final_score)
-        np.savez_compressed(f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/month{month}_scores_china_5d_averaged.npz", 
+        np.savez_compressed(f"{cfg.directory.cncast_v1_scores_path}/month{month}_scores_china_5d_averaged.npz", 
                             scores=final_score, mid_rmse=scores)
 
 

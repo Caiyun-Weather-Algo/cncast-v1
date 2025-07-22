@@ -1,8 +1,6 @@
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
-# from evaluation import final_score, utils
-from utils import util
 import hydra
 from matplotlib.gridspec import GridSpec
 
@@ -36,10 +34,10 @@ def plot_subfigure(scores, x, ax, xlabel, ylabel, title, text, level="surf", lab
             fontsize=12, fontweight="bold", va="top", ha="left")
 
 
-@hydra.main(version_base=None, config_path="/home/lianghongli/caiyun-algo-misc/caiyun-era5-pretrain/conf", config_name="train_40yr_config.yaml")
+@hydra.main(version_base=None, config_path="./configs", config_name="online.yaml")
 def main(cfg):
     center = 241-60*2
-    fpath = Path("/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse/pangu_july_score")
+    fpath = Path(f"{cfg.directory.base_path}/pangu_july_score")
     fs_pangu_score = [fpath/f"ifs-init_score_pangu_step{k}_center{center}.npz" for k in range(6,121,6)]
     
     use_ifs = True
@@ -60,33 +58,30 @@ def main(cfg):
             if i==0:
                 surf_scores[k] = np.array(v).astype(np.float32).reshape(-1,1)
             else:
-                # surf_scores[k] = np.concatenate((surf_scores[k], np.array(v).astype(np.float32).reshape(-1,1)), axis=1)
                 surf_scores[k] = np.concatenate((surf_scores[k], np.array(v).astype(np.float32).reshape(-1,1)), axis=1)
         for k, v in score["high"].items():
             if i==0:
-                # high_scores[k] = np.array(v).astype(np.float32).reshape(-1,1)
                 high_scores[k] = np.stack(v, axis=0).astype(np.float32)[:,:,None]
             else:
-                # high_scores[k] = np.concatenate((high_scores[k], np.array(v).astype(np.float32).reshape(-1,1)), axis=1)
                 high_scores[k] = np.concatenate((high_scores[k], np.stack(v, axis=0).astype(np.float32)[:,:,None]), axis=2)
     
-    fig_prefix = Path("/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/ifs-init_score_comparison_pangu-cncast")
+    fig_prefix = Path(f"{cfg.directory.base_path}/ifs-init_score_comparison_pangu-cncast")
     fig_prefix.mkdir(exist_ok=True)
     month = 7
-    cn_score_july = np.load(f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/ifs-init_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
+    cn_score_july = np.load(f"{cfg.directory.cncast_v1_scores_path}/ifs-init_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
     cn_score_surf = cn_score_july['surf']
     cn_score_high = cn_score_july['high']
     if use_aifs_bound:
-        cn_aifs_score = np.load(f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/ifs-init_aifs-bound_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
+        cn_aifs_score = np.load(f"{cfg.directory.cncast_v1_scores_path}/ifs-init_aifs-bound_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
         cn_aifs_score_surf = cn_aifs_score['surf']
         cn_aifs_score_high = cn_aifs_score['high']
     print(cn_score_surf.keys())
     if use_ifs:
-        ifs_score_july = np.load(f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/ifs_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
+        ifs_score_july = np.load(f"{cfg.directory.cncast_v1_scores_path}/ifs_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
         ifs_score_surf = ifs_score_july['surf']
         ifs_score_high = ifs_score_july['high']
     if use_aifs:
-        aifs_score_july = np.load(f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/aifs_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
+        aifs_score_july = np.load(f"{cfg.directory.cncast_v1_scores_path}/aifs_month7_scores_china_5d_center{center}.npz", allow_pickle=True)["scores"].tolist()
         aifs_score_surf = aifs_score_july['surf']
         aifs_score_high = aifs_score_july['high']
 
@@ -123,16 +118,12 @@ def main(cfg):
             rmses = rmses + [cn_aifs_score_surf[kk][0]]
             accs = accs + [cn_aifs_score_surf[kk][1]*100]
         plot_subfigure(rmses, x, axes[idx], "Lead time(hs)", f"RMSE({units[k]})", titles[k], labels[idx],level="surf", labels=["pangu", "cncast", "ifs", "aifs", "cncast_aifs-bc"])
-        # plot_subfigure(accs, x, axes[idx+4], "Lead time(hs)", "ACC(%)", var_name, labels[idx*2+1],level="surf", labels=["pangu", "cncast", "ifs", "aifs"])
         idx += 1
     
     plt.subplots_adjust(left=0.05, right=0.97, bottom=0.07, top=0.95)
-    # plt.savefig(f"{fig_prefix}/comparison_month{month}_surface_center{center}_rmseonly_with_aifs-bc_120h.pdf") 
-    # exit()
+    plt.savefig(f"{fig_prefix}/comparison_month{month}_surface_center{center}_rmse_with_aifs-bc_120h.pdf") 
     ## upper-air scores
     units = {"geopotential": "$m^2/s^2$", "temperature": "$K$", "u_component_of_wind": "$m/s$", "v_component_of_wind": "$m/s$", "specific_humidity": "$g/kg$"}
-    # fig, axes = plt.subplots(2, 5, figsize=(25, 8))
-    # axes = axes.flatten()
 
     fig = plt.figure(figsize=(22, 10), dpi=300)
     gs = GridSpec(2, 6, figure=fig)  # 2 rows, 6 columns (to center the bottom row)
@@ -144,8 +135,6 @@ def main(cfg):
     # Bottom row: 2 subplots (centered by spanning columns 2-3 and 4-5)
     ax4 = fig.add_subplot(gs[1, 1:3]) # Row 1, Columns 1-2 (shifted right)
     ax5 = fig.add_subplot(gs[1, 3:5]) # Row 1, Columns 3-4 (shifted left)
-    # axes[1,2].remove()
-    # axes = axes.flatten()
     axes = [ax1, ax2, ax3, ax4, ax5]
     labels = "abcdefghij"
     # fig.suptitle("RMSE Scores by Lead Time", fontsize=16)
@@ -155,19 +144,10 @@ def main(cfg):
     idx_level_pangu = [1000,850,700,600,500,400,300,250,200,150,100].index(int(level))
     idx_level_ifs = [1000,925,850,700,600,500,400,300,250,200,150,100,50].index(int(level))
     print(high_scores.keys(), cn_score_high["geopotential"][0].shape)
-    # exit()
+
     for k, v in high_scores.items():
-        # if "500" not in k:
-        #     continue
-        # if "temperature" not in k and "geopotential" not in k:
-        #     name, level = "_".join(k.split("_")[:-1]), k.split("_")[-1]
-        # else:
-        #     name, level = k.split("_")[0], int(k.split("_")[-1])
         name = k
         print(name, level)
-        # if level in k:
-        # rmses = [high_scores[k][0], cn_score_high[name][0][:,idx_level]]
-        # accs = [high_scores[k][1]*100, cn_score_high[name][1][:,idx_level]*100]
         ##### IFS inited
         rmses = [high_scores[k][0,idx_level_pangu], cn_score_high[name][0][:,idx_level]]
         accs = [high_scores[k][1,idx_level_pangu]*100, cn_score_high[name][1][:,idx_level]*100]
@@ -184,11 +164,10 @@ def main(cfg):
         if "specific" in k:
             rmses = [rmses[m]*1000 for m in range(len(rmses))]
         plot_subfigure(rmses, x, axes[idx], "Lead time(hs)", f"RMSE({units[k]})", f"{titles[k]}{level}", labels[idx], level="high", labels=["pangu", "cncast", "ifs", "aifs", "cncast_aifs-bc"])
-        # plot_subfigure(accs, x, axes[idx+5], "Lead time(hs)", "ACC(%)", k, labels[idx*2+1], level="high", labels=["pangu", "cncast", "ifs", "aifs"])
         idx += 1
     
     plt.subplots_adjust(left=0.036, right=0.985, bottom=0.07, top=0.95)
-    plt.savefig(f"{fig_prefix}/comparison_month{month}_upper_{level}hPa_center{center}_rmseonly_with_aifs-bc_120h.pdf")
+    plt.savefig(f"{fig_prefix}/comparison_month{month}_upper_{level}hPa_center{center}_rmse_with_aifs-bc_120h.pdf")
 
 if __name__ == '__main__':
     main()

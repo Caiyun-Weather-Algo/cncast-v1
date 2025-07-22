@@ -33,6 +33,54 @@ def plot_subfigure(scores, x, ax, xlabel, ylabel, title, text):
     return
 
 
+def load_era5(start, end, levels, cfg):
+    step = 6
+    surf_vars = ["2m_temperature", "mean_sea_level_pressure", "10m_u_component_of_wind", "10m_v_component_of_wind"]
+    high_vars = ["geopotential", "temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"]
+    surf_var_abbr = ["t2m", "msl", "u10", "v10"]
+    high_var_abbr = ["z", "t", "q", "u", "v"]
+    # Initialize empty lists to store data for each variable
+    surf_data = {var: [] for var in surf_vars}
+    high_data = {var: [] for var in high_vars}
+    
+    # Loop through each day
+    for ts in range(start, end, 3600*24):
+        t = arrow.get(ts).format("YYYYMMDD")
+        # Process surface variables
+        # ts2sel = [arrow.get(ts_).format("YYYY-MM-DDTHH:00:00.000000000") for ts_ in range(ts+3600, ts+3600*24, 3600*6)]
+        surf_vars_data = []
+        for k, var in enumerate(surf_vars):
+            f = f"{cfg.directory.home_path}/{cfg.buckets.bucket_era5}/202407/2024/era5.{var}.{t}.nc"
+            ds = xr.open_dataset(f)
+
+            # Take every 6th hour (0, 6, 12, 18)
+            data = ds[surf_var_abbr[k]].isel(time=[0,6,12,18])
+            surf_vars_data.append(data)
+            
+        # Process upper air variables
+        high_vars_data = []
+        for k, var in enumerate(high_vars):
+            f = f"{cfg.directory.home_path}/{cfg.buckets.bucket_era5}/202407/2024/era5.{var}.{t}.nc"
+            ds = xr.open_dataset(f)
+            # Take every 6th hour (0, 6, 12, 18)
+            data = ds[high_var_abbr[k]].isel(time=[0,6,12,18], level=levels)
+            high_vars_data.append(data)
+        
+        # Concatenate variables for this time step
+        # Create DataArrays with variable coordinates
+        surf_vars_data = [da.assign_coords(variable=var) for da, var in zip(surf_vars_data, surf_vars)]
+        high_vars_data = [da.assign_coords(variable=var) for da, var in zip(high_vars_data, high_vars)]
+        
+        surf_data['all_vars'] = surf_data.get('all_vars', []) + [xr.concat(surf_vars_data, dim='variable')]
+        high_data['all_vars'] = high_data.get('all_vars', []) + [xr.concat(high_vars_data, dim='variable')]
+    
+    # Concatenate all time steps
+    surf_ds = xr.concat(surf_data['all_vars'], dim='time').transpose('time', 'variable', 'latitude', 'longitude')
+    high_ds = xr.concat(high_data['all_vars'], dim='time').transpose('time', 'variable', 'level', 'latitude', 'longitude')
+    
+    return surf_ds, high_ds
+
+
 def mid_rmse(pred, y, scores, cfg, lat_weights, avgs):
     pred_surf, pred_high = pred
     y_surf, y_high = y
@@ -71,18 +119,12 @@ def mid_rmse(pred, y, scores, cfg, lat_weights, avgs):
 def final_rmse(scores, cfg):
     final_score = {"surf":{}, "high":{}}
     # cnt = xm.xrt_world_size()
-    fig_prefix = f"../weather-caiyun/lianghl/pretrain_results/exp{cfg.exp}/eval"
-    os.makedirs(fig_prefix, exist_ok=True)
     for k, v in scores["surf"].items():
         final_score["surf"][k] = [np.sqrt(v[1]/v[0]/cfg.hyper_params.batch_size/241/281),  # RMSE
                                   v[2]/np.sqrt(v[3]*v[4])]                        # ACC
-        util.plot_score(final_score["surf"][k][0], list(range(1,len(final_score["surf"][k][0])+1)), "forecast time(hs)", "RMSE", k, f"{fig_prefix}/exp{cfg.exp}_{k}_rmse.png")
-        util.plot_score(final_score["surf"][k][1], list(range(1,len(final_score["surf"][k][1])+1)), "forecast time(hs)", "ACC", k, f"{fig_prefix}/exp{cfg.exp}_{k}_acc.png")
     
     for k, v in scores["high"].items():
         final_score["high"][k] = [np.sqrt(v[1]/v[0]/cfg.hyper_params.batch_size/241/281),  # RMSE
                                   v[2]/np.sqrt(v[3]*v[4])]                        # ACC
-        util.plot_score(final_score["high"][k][0], list(range(1,len(final_score["high"][k][0])+1)), "forecast time(hs)", "RMSE", k, f"{fig_prefix}/exp{cfg.exp}_{k}_rmse.png")
-        util.plot_score(final_score["high"][k][1], list(range(1,len(final_score["high"][k][1])+1)), "forecast time(hs)", "ACC", k, f"{fig_prefix}/exp{cfg.exp}_{k}_acc.png")
     return final_score
         

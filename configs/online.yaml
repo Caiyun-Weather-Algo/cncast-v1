@@ -1,3 +1,16 @@
+buckets:
+  bucket_base: "weather-us-central1"
+  bucket_ifs: "ecmwf-open-data"
+  bucket_era5: "era5_china_src"
+
+directory:
+  home_path: /home/lianghongli
+  model_path: /home/lianghongli/${buckets.bucket_base}/cncast_v1/model_ckpts
+  base_path: /home/lianghongli/${buckets.bucket_base}/cncast_v1
+  save_path: /home/lianghongli/${buckets.bucket_base}/cncast_v1/results
+  cncast_v1_scores_path: /home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/
+
+## ------- models for training and inference ------- ##
 model:
   name: swin_transformer_3d_slidepatch
   swin_transformer_3d_slidepatch:
@@ -34,7 +47,7 @@ model:
     embed_dim: 16
     latent_shape: [16, 32, 32]
     scaling_factor: 0.68027   ## std of era5 latent is about 1.47
-    ckpt_path: /home/lianghongli/weather-us-central1/lianghl/precip_diff/ldm_autoencoder_exp3/models/ldm_autoencoder_consolidated_best.pth.tar
+    ckpt_path: ${directory.model_path}/era5-tp_VAE_best.pth.tar
     lossconfig:
       target: src.models.contperceptual.LPIPSWithDiscriminator
       params:
@@ -57,7 +70,7 @@ model:
     embed_dim: 256
     latent_shape: [256, 32, 32]
     scaling_factor: 0.56497   ## std of era5 latent is about 1.77
-    ckpt_path: /home/lianghongli/weather-us-central1/lianghl/precip_diff/ldm_autoencoder_exp4/models/ldm_autoencoder_consolidated_best.pth.tar
+    ckpt_path: ${directory.model_path}/era5_VAE_best.pth.tar
     lossconfig:
       target: src.models.contperceptual.LPIPSWithDiscriminator
       params:
@@ -81,7 +94,7 @@ model:
     latent_shape: [16, 32, 32]
     scaling_factor: 0.76923   ## std of cmpa latent is about 1.3
     # ckpt_path: /home/lianghongli/weather-us-central1/hess/autoencoder_kl_gan_expcmpa/models/autoencoder_kl_gan_best.pth.tar
-    ckpt_path: /home/lianghongli/weather-us-central1/lianghl/precip_diff/ldm_autoencoder_exp5/models/ldm_autoencoder_consolidated_best.pth.tar
+    ckpt_path: ${directory.model_path}/cmpa_VAE_best.pth.tar
     lossconfig:
       target: src.models.contperceptual.LPIPSWithDiscriminator
       params:
@@ -175,14 +188,3 @@ visualization:
     level:
     - 850
     # - 500
-
-buckets:
-  bucket_base: "weather-us-central1"
-  bucket_ifs: "ecmwf-open-data"
-  bucket_era5: "era5_china_src"
-
-directory:
-  model_path: /home/lianghongli/weather-us-central1/cncast_v1/model_ckpts
-  base_path: /home/lianghongli/weather-us-central1/cncast_v1
-  save_path: /home/lianghongli/weather-us-central1/cncast_v1/results
-  cncast_v1_scores_path: /home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse_bc/cncast-v1_scores/

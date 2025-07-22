@@ -1,73 +1,22 @@
 import numpy as np
-import os
+import hydra
 from glob import glob
 from pathlib import Path
-import yaml
 import arrow
 import xarray as xr
 import matplotlib.pyplot as plt
 from typing import OrderedDict
 from datetime import datetime
-from imageio import imsave
+from omegaconf import OmegaConf
 
-from utils import util
-
-
-def load_era5(start, end, levels):
-    step = 6
-    surf_vars = ["2m_temperature", "mean_sea_level_pressure", "10m_u_component_of_wind", "10m_v_component_of_wind"]
-    high_vars = ["geopotential", "temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"]
-    surf_var_abbr = ["t2m", "msl", "u10", "v10"]
-    high_var_abbr = ["z", "t", "q", "u", "v"]
-    # Initialize empty lists to store data for each variable
-    surf_data = {var: [] for var in surf_vars}
-    high_data = {var: [] for var in high_vars}
-    
-    # Loop through each day
-    for ts in range(start, end, 3600*24):
-        t = arrow.get(ts).format("YYYYMMDD")
-        # Process surface variables
-        surf_vars_data = []
-        for k, var in enumerate(surf_vars):
-            f = f"/home/lianghongli/era5_china_src/202407/2024/era5.{var}.{t}.nc"
-            ds = xr.open_dataset(f)
-            # Take every 6th hour (0, 6, 12, 18)
-            data = ds[surf_var_abbr[k]].isel(time=[0,6,12,18])
-            surf_vars_data.append(data)
-            
-        # Process upper air variables
-        high_vars_data = []
-        for k, var in enumerate(high_vars):
-            f = f"/home/lianghongli/era5_china_src/202407/2024/era5.{var}.{t}.nc"
-            ds = xr.open_dataset(f)
-            # Take every 6th hour (0, 6, 12, 18)
-            data = ds[high_var_abbr[k]].isel(time=[0,6,12,18], level=levels)
-            high_vars_data.append(data)
-        
-        # Concatenate variables for this time step
-        # Create DataArrays with variable coordinates
-        surf_vars_data = [da.assign_coords(variable=var) for da, var in zip(surf_vars_data, surf_vars)]
-        high_vars_data = [da.assign_coords(variable=var) for da, var in zip(high_vars_data, high_vars)]
-        
-        surf_data['all_vars'] = surf_data.get('all_vars', []) + [xr.concat(surf_vars_data, dim='variable')]
-        high_data['all_vars'] = high_data.get('all_vars', []) + [xr.concat(high_vars_data, dim='variable')]
-    
-    # Concatenate all time steps
-    surf_ds = xr.concat(surf_data['all_vars'], dim='time').transpose('time', 'variable', 'latitude', 'longitude')
-    high_ds = xr.concat(high_data['all_vars'], dim='time').transpose('time', 'variable', 'level', 'latitude', 'longitude')
-    
-    return surf_ds, high_ds
-
-def load_vars(f):
-    with open(f) as g:
-        vars = yaml.load(g, Loader=yaml.Loader)
-    return vars
+from src.utils import util
+from src.eval.eval_utils import load_era5
 
 
-def main():
-    # fpath = Path("/home/lianghongli/pangu_weather")
-    fpath = Path("/home/lianghongli/weather-us-central1/pangu_ifs_202407")
-    variables = OrderedDict(load_vars("./utils/pangu_config.yaml"))
+@hydra.main(version_base=None, config_path="./configs", config_name="online.yaml")
+def main(cfg):
+    fpath = Path(f"{cfg.directory.home_path}/{cfg.buckets.bucket_base}/pangu_ifs_202407")
+    variables = OmegaConf.load("./utils/pangu_config.yaml")
     
     start = "2024070100"
     end = "2024073100"
@@ -76,10 +25,10 @@ def main():
     era5_2024_levels = [50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,925,950,1000]
     levels = [1000, 850, 700,600,500,400,300,250,200,150,100]
     lev_idxs_2024 = [era5_2024_levels.index(lev) for lev in levels]  
-    era5_surf, era5_upper = load_era5(start_ts, end_ts, lev_idxs_2024)
+    era5_surf, era5_upper = load_era5(start_ts, end_ts, lev_idxs_2024, cfg)
     # print("era5_surf:", era5_surf, "era5_upper:", era5_upper)
     print(era5_surf.isel(time=0).shape, era5_upper.isel(time=0).shape)
-    # exit()
+
     lev_idx_pangu = [0, 2, 3,4,5,6,7,8,9,10,11]  ## shared level: 1000, 850, 700,600,500,400,300,250,200,150,100
     avg_origin_levels = list(range(100, 1001, 50)) + [925, 50]
     avg_idx = [avg_origin_levels.index(l) for l in levels]
@@ -100,7 +49,7 @@ def main():
     leads = list(range(6,121,6))
     for step in leads:
         scores = {"surf": {}, "high": {}}
-        fscore_step = f"/home/lianghongli/weather-caiyun/lianghl/pretrain_results/pred_recurse/pangu_july_score/ifs-init_score_pangu_step{step}_center{241-lat_stride*2}.npz"
+        fscore_step = f"{cfg.directory.base_path}/pangu_july_score/ifs-init_score_pangu_step{step}_center{241-lat_stride*2}.npz"
         # if os.path.exists(fscore_step):
         #     print(fscore_step, "exists")
         #     continue
@@ -112,13 +61,9 @@ def main():
             df_high_era5 = era5_upper.sel(time=tdata)
             ## pangu
             print(fpath/f"init-IFS_pangu_{t}_lead{step}.zarr")
-            # try:
             df_surf_pangu = xr.open_zarr(fpath/f"init-IFS_pangu_{t}_lead{step}.zarr", group="surf", consolidated=True).sel(latitude=slice(bound[2], bound[0]), longitude=slice(bound[1], bound[3]))["surface"][0]
             df_high_pangu = xr.open_zarr(fpath/f"init-IFS_pangu_{t}_lead{step}.zarr", group="high", consolidated=True).sel(latitude=slice(bound[2], bound[0]), longitude=slice(bound[1], bound[3]))["upper"]
             df_high_pangu = df_high_pangu[0,:,lev_idx_pangu]
-            # except:
-            #     print(f"init-IFS_pangu_{t}_lead{step}.zarr not found or damaged")
-            #     continue
             print(df_surf_era5.shape, df_surf_pangu.shape, df_high_pangu.shape, df_high_era5.shape)
             idx_era5 = [1,2,3,0]
             for k, var in enumerate(variables["input"]["surface"]):
@@ -165,10 +110,8 @@ def main():
         print(scores)
         np.savez_compressed(fscore_step, scores=scores)
         print(fscore_step, "done")
-        # break
     
     return
-
 
 
 if __name__=="__main__":

@@ -7,7 +7,6 @@ import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 
 
-
 def era5_stat():
     variables = pickle.load(open("./share/era5_stats_1980-2018.pkl", "rb"))
     return variables
@@ -25,6 +24,24 @@ def resize(data, idxs):
     interped = data[..., idxs[0], :][..., idxs[1]]
     return interped
 
+
+def ACC(y, pred, yavg, lat_weight):
+    '''
+    y, pred are long-term-mean-subtracted values
+    '''
+    # Calculate anomaly correlation coefficient (ACC)
+    # ACC is calculated as the correlation between predicted and observed anomalies
+    # from their respective climatological means, weighted by latitude
+    x = np.nansum((y-yavg)*(pred-yavg)*lat_weight, axis=(-2,-1))
+    d = np.nansum((y-yavg)**2*lat_weight, axis=(-2,-1)) * np.nansum((pred-yavg)**2*lat_weight, axis=(-2,-1))
+    return x/np.sqrt(d)
+
+
+def RMSE(y, pred, lat_weight):
+    x = np.nansum((y-pred)**2 * lat_weight, axis=(-2,-1))
+    size = (~np.isnan(y)).sum(axis=(-2,-1))
+    rmse = np.sqrt(x/size)
+    return rmse
 
 def static4eval(lev_idxs):
     surf_avg = np.load("./share/surf_var_mean_pix-lev_38ys.npz")["data"]  # for ACC calculation
