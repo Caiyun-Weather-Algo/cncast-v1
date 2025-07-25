@@ -1,9 +1,11 @@
+from functools import lru_cache
 import arrow
 import time
 from datetime import datetime
 import numpy as np
 import yaml, hydra
 from einops import rearrange
+import xarray as xr
 
 from src.utils import util
 from src.data.feature_encoding import load_static
@@ -42,6 +44,7 @@ class ERA5Dataset(BaseDataset):
                  ):
         super().__init__()
         self.variables = util.era5_stat()
+        self.variables["surface"]["total_precipitation"]["meanstd"] = [5.27158476833704, 8.765997488569014]
         self.input_vars = input_vars
         self.output_vars = output_vars
         self.forecast_step = forecast_step
@@ -113,22 +116,29 @@ class ERA5Dataset(BaseDataset):
         xbc = [[surf_bc_bottom, surf_bc_left, surf_bc_top, surf_bc_right], [high_bc_bottom, high_bc_left, high_bc_top, high_bc_right]]
         return xbc
 
+    @lru_cache
+    def get_bc_coords(self):
+        lats025 = np.linspace(60, 0, 241, dtype=np.float32)
+        lons025 = np.linspace(70, 140, 281, dtype=np.float32)
+        lats_bc = [lats025[-4:], lats025, lats025[:4], lats025]
+        lons_bc = [lons025, lons025[:4], lons025, lons025[-4:]]
+        return lats_bc, lons_bc
+
     def get_bc_from_file(self, tfcst: str = "2021070100"):
         fbc_surf = f"gcs://{self.bucket_cfg.bucket_era5}/bc_2021/bc_surf_{tfcst}.zarr"
         fbc_high = f"gcs://{self.bucket_cfg.bucket_era5}/bc_2021/bc_high_{tfcst}.zarr"
         ds_bc_surf = xr.open_zarr(fbc_surf)
         ds_bc_high = xr.open_zarr(fbc_high)
         bc_surf, bc_high = [], []
-        for j,bcname in enumerate(["bottom", "left", "top", "right"]):
-            var_name = f"bc_surf_{bcname}"
-            data = ds_bc_surf[f"bc_{bcname}"].sel(lat=lats_bc[j],lon=lons_bc[j]).values
-            bc_surf.append(data)
-            var_name = f"bc_high_{bcname}"
-            data = ds_bc_high[f"bc_{bcname}"].sel(lat=lats_bc[j],lon=lons_bc[j]).values
-            bc_high.append(data)
+        lats_bc, lons_bc = self.get_bc_coords()
         
-        xbc = [bc_surf, bc_high]
-        return xbc
+        for j,bcname in enumerate(["bottom", "left", "top", "right"]):
+            data = ds_bc_surf[f"bc_{bcname}"].sel(lat=lats_bc[j],lon=lons_bc[j]).values
+            bc_surf.append(data.squeeze())
+            data = ds_bc_high[f"bc_{bcname}"].sel(lat=lats_bc[j],lon=lons_bc[j]).values
+            bc_high.append(data.squeeze())
+        
+        return [bc_surf, bc_high]
     
     def get_cmpa_tp(self, sample_start_time):
         sample_times = [sample_start_time+h*3600 for h in range(-self.cmpa_frame+1, 1)]
@@ -334,7 +344,8 @@ class IFSDataset(BaseDataset):
         t = arrow.get(sample_start_time).format("YYYYMMDDHH")
         x_surf, x_high = self.process_ifs(t, lead_time=0)
         x_high = rearrange(x_high, 'v d h w -> (v d) h w')
-        return (sample_start_time, x_surf, x_high)
+        x = np.concatenate((x_surf, x_high), axis=0)
+        return (sample_start_time, x)
 
     
     def process_ifs(self, init_time: str, 

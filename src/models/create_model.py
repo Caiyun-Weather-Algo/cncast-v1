@@ -19,7 +19,7 @@ def load_model(model_name, cfg):
         args = cfg.model.dit
         model = dit.DiT_models["DiT-S/4"](input_size=args.input_size, cond_size=args.cond_size, img_size=args.img_size, 
                                         in_channels=args.in_channels, out_channels=args.out_channels, 
-                                        cond_channels=args.cond_channels, learn_sigma=args.learn_sigma)
+                                        cond_channels=args.cond_channels)
     elif model_name=="dit_cmpa":
         args = cfg.model.dit_cmpa
         model = DiT_models["DiT-S/2"](

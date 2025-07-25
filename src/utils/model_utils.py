@@ -16,17 +16,17 @@ def load_ckpt(lead_time, cfg, target: str = "non-tp"):
 
     if target=="non-tp":
         model = load_model(cfg.model.name, cfg)
-        ckpt_path = f"{model_path}/swin_transformer_3d_cncast_v1_{lead_time}h.pth.tar"
+        ckpt_path = f"{model_path}/cncast_v1_withbc/swin_transformer_3d_cncast_v1_{lead_time}h.pth.tar"
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["model"])
     elif target=="tp":
         model = load_model("dit", cfg) 
-        ckpt_path = f"{model_path}/precip_diagnosis_dit_ckpt.pt"
+        ckpt_path = f"{model_path}/cn_tp_0p25/precip_diagnosis_dit_ckpt.pt"
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["ema"])
     elif target=="tp-sr":
         model = load_model("swinir", cfg) 
-        ckpt_path = f"{model_path}/swinir_tp_sr.pth.tar"
+        ckpt_path = f"{model_path}/cn_tp_0p25/swinir_tp_sr.pth.tar"
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["model"])
     model.eval()
@@ -44,7 +44,7 @@ def bc_att_ifs(ts, lead_hr, dataset, device):
 
 
 def bc_att_era5(timestamp, j, dataset, device):
-    t = arrow.get(ts).shift(hours=+j).format("YYYYMMDDHH")
+    t = arrow.get(timestamp).shift(hours=+j).format("YYYYMMDDHH")
     xbc = dataset.get_bc_from_file(t)
     xbc = [[totensor(x[None,:], device) for x in bc_list] for bc_list in xbc]
     return xbc
@@ -59,11 +59,14 @@ def affine_model_idx(models, j, leads=[24,6,3,1]):
     return model, x_idx
 
 
-def iter_predict(x_surf, x_high, ts, cfg, static):
-    device = x_surf.device
+def iter_predict(xin, ts, cfg, static):
+    device = xin.device
+    in_chans2d = cfg.model.swin_transformer_3d_slidepatch.in_chans[0]
+    x_surf, x_high = xin[:, :in_chans2d], xin[:, in_chans2d:]
     lats, lons, levels, dem, forecast_day, models, dataset, data_source = static
             
     with torch.no_grad():
+        print(x_surf.shape)
         fcst_surf = util.to_dataset(x_surf.cpu().numpy(), [ts], cfg.input.surface, lats, lons, levels=None)
         fcst_high = util.to_dataset(rearrange(x_high.cpu().numpy(), 'b (c v) h w -> b c v h w', c=5), [ts], cfg.input.high, lats, lons, levels=levels)
         for j in range(1, forecast_day*24+1):
@@ -77,12 +80,12 @@ def iter_predict(x_surf, x_high, ts, cfg, static):
 
             x_surf = torch.cat((totensor(fcst_surf['surface'][x_idx:(x_idx+1)].values, device), dem), dim=1)
             x_high = totensor(fcst_high['upper'][x_idx:(x_idx+1)].values, device)
-            output = model([x_surf, x_high], xbc)            
-            output = [output[0].cpu().numpy(), output[1].cpu().numpy()]
-            output[1] = rearrange(output[1], 'b (c v) h w -> b c v h w', c=5)
+            output = model(torch.cat((x_surf, rearrange(x_high, 'b c v h w -> b (c v) h w')), dim=1), xbc)            
+            output = output.cpu().numpy()
+            out_high = rearrange(output[:, in_chans2d:], 'b (c v) h w -> b c v h w', c=5)
 
-            surf = util.to_dataset(output[0], [ts+3600*j], cfg.input.surface, lats, lons, levels=None)
-            high = util.to_dataset(output[1], [ts+3600*j], cfg.input.high, lats, lons, levels=levels)
+            surf = util.to_dataset(output[:,:in_chans2d], [ts+3600*j], cfg.input.surface, lats, lons, levels=None)
+            high = util.to_dataset(out_high, [ts+3600*j], cfg.input.high, lats, lons, levels=levels)
             fcst_surf = xr.concat([fcst_surf, surf], dim="time")
             fcst_high = xr.concat([fcst_high, high], dim="time")
 
@@ -122,14 +125,12 @@ def iter_pred_tp(tp_x_surf, tp_x_high, ts, dataset, models, static_args, tp_high
         z = torch.randn(xin.shape[0], 1, *xin.shape[-2:]).to(device)
         
         tp_pred = gen_samples(diffusion, tp_model, z, dict(cond=xin), device) #.detach().cpu().numpy() 
-
         tp_pred = dataset.denorm(tp_pred, "surface", "total_precipitation", v=None, norm_method="meanstd").detach().cpu().numpy()
-        
         if tp_high_res:
             sr_in = torch.tensor(tp_pred, dtype=torch.float32).to(device)
         ## convert from dbz to precipitation with unit mm/h
         tp_pred = util.dbz2tp(tp_pred)
-        tp_pred = tp_pred*(tp_pred>=0.1)
+        tp_pred = tp_pred*(tp_pred>=0.05)
         tp_pred = util.resize(tp_pred, inverse_interp_idxs)
         tp_pred = util.to_dataset(tp_pred, [ts+p_*3600 for p_ in range(p,p+batch_size)], ["tp"], lats, lons, levels=None) 
         ## super resolution

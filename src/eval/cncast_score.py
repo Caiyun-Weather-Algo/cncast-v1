@@ -102,7 +102,7 @@ def main(cfg):
             final_score["high"][var] = [rmse_high[:,i]/(k+1-damaged), acc_high[:,i]/(k+1-damaged)]
         print(final_score)
         np.savez_compressed(f"{cfg.directory.cncast_v1_scores_path}/month{month}_scores_china_5d_averaged.npz", 
-                            scores=final_score, mid_rmse=scores)
+                            scores=final_score)
 
 
 if __name__=="__main__":
